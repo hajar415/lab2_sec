@@ -1,36 +1,28 @@
-# lab2_sec
-# Rapport de Laboratoire : Rooting Android
+# Lab 2 — Rooting Android & Intégrité Système
 
-## 1. Fiche Périmètre
+## Environnement
 
-- **Auteur :** HAJAR CHATBAOUI
 - **Support :** Android Studio AVD — Pixel 5 API 30
-- **Version OS :** Android 11 / API 30
+- **Version Android :** 11 / API 30
 - **Application testée :** F-Droid (org.fdroid.fdroid)
-- **Objectif :** Comprendre le rooting, ses impacts sur le sandboxing et les mécanismes Verified Boot / AVB
-- **Données / Réseau :** Données fictives uniquement sur réseau local isolé
+- **Données :** fictives uniquement
+- **Réseau :** isolé (Host-Only)
 
 ---
 
-## 2. Fondamentaux Théoriques
+## Avant de commencer
 
-### Le Rooting
+L'objectif de ce lab est de comprendre ce que le rooting change concrètement sur Android : quels mécanismes il contourne, comment vérifier l'état du système, et comment remettre l'environnement à zéro après les tests.
 
-Le rooting consiste à obtenir les privilèges super-utilisateur (UID 0) sur Android. Cela modifie la confiance du système et permet de briser le sandboxing (isolation des apps). En laboratoire, c'est un outil utile pour inspecter des zones normalement inaccessibles, mais il supprime les garanties d'intégrité logicielle. Il nécessite un environnement isolé, une traçabilité complète et un reset en fin de session.
-
-### Verified Boot & AVB
-
-- **Verified Boot :** garantit que le code exécuté provient d'une source de confiance (fabricant) et n'a pas été altéré.
-- **AVB (Android Verified Boot 2.0) :** version moderne qui ajoute une protection contre le rollback (empêche de réinstaller d'anciennes versions vulnérables) et vérifie l'intégrité des partitions system, vendor et boot.
-- **Chain of Trust :** chaque composant (bootloader, kernel, system) vérifie la signature du suivant avant de l'exécuter.
+**Règles appliquées :** aucune donnée réelle, AVD dédié uniquement aux tests, reset obligatoire en fin de session.
 
 ---
 
-## 3. Réalisation Technique
+## Partie 1 — Préparation et connexion
 
-### A — Démarrage de l'AVD
+### Lancement de l'AVD avec partitions modifiables
 
-L'AVD Pixel 5 API 30 a été lancé depuis Android Studio avec l'option `-writable-system` pour permettre la modification des partitions normalement en lecture seule.
+L'émulateur est lancé depuis le terminal avec l'option `-writable-system`. Sans cette option, `adb remount` échoue car les partitions sont montées en lecture seule par défaut.
 
 ```bash
 emulator -avd Pixel_5 -writable-system
@@ -38,21 +30,32 @@ emulator -avd Pixel_5 -writable-system
 
 ![AVD démarré](captures/img1.jpg)
 
-### B — Connexion ADB et élévation de privilèges
+### Vérification de la connexion ADB
 
 ```bash
 adb devices
+```
+
+La commande confirme que l'émulateur est bien détecté et prêt.
+
+![adb devices](captures/img2.jpg)
+
+---
+
+## Partie 2 — Élévation de privilèges
+
+### Activation du mode root et remontage des partitions
+
+```bash
 adb root
 adb remount
 ```
 
-`adb devices` confirme la détection de l'émulateur. `adb root` démarre le serveur ADB en mode root. `adb remount` remonte les partitions système en lecture/écriture — verity est désactivé automatiquement.
+`adb root` redémarre le démon ADB avec les privilèges administrateur. `adb remount` remonte ensuite les partitions système en lecture/écriture en désactivant verity automatiquement.
 
-![adb devices](captures/img2.jpg)
+![adb root et remount](captures/img3.jpg)
 
-![adb root + remount](captures/img3.jpg)
-
-### C — Vérification de l'état du système
+### Vérification de l'état après root
 
 ```bash
 adb shell id
@@ -61,82 +64,105 @@ adb shell getprop ro.boot.veritymode
 adb shell "su -c id"
 ```
 
-Résultats obtenus :
+![résultats des vérifications](captures/img4.jpg)
 
-| Commande | Résultat | Interprétation |
-|----------|----------|----------------|
-| `adb shell id` | `uid=0(root)` | Privilèges root confirmés |
-| `verifiedbootstate` | `orange` | Intégrité non garantie, système modifié |
-| `veritymode` | *(vide)* | Verity désactivé via `-writable-system` |
-| `su -c id` | `su: invalid uid/gid` | Normal — le shell est déjà root |
+**Interprétation :**
 
-![vérifications système](captures/img4.jpg)
+| Commande | Résultat | Signification |
+|----------|----------|---------------|
+| `adb shell id` | `uid=0(root)` | Accès root confirmé |
+| `verifiedbootstate` | `orange` | Le système a été modifié, intégrité non garantie |
+| `veritymode` | *(vide)* | Verity désactivé par `-writable-system` |
+| `su -c id` | `su: invalid uid/gid` | Normal, le shell est déjà en root |
 
-Le résultat `orange` confirme que Verified Boot a bien détecté la modification du système. C'est le comportement attendu et il démontre concrètement l'efficacité du mécanisme AVB.
+Le résultat `orange` est particulièrement intéressant : il montre que Android Verified Boot a bien détecté la modification du système. C'est exactement le rôle d'AVB — signaler toute altération même sur un émulateur de lab.
 
-### D — Installation de F-Droid
+---
+
+## Partie 3 — Tests sur l'application
+
+### Installation de F-Droid
 
 ```bash
 adb install "C:\Users\WINDOWS 11\Downloads\F-Droid.apk"
 ```
 
-![F-Droid installé](captures/img5.jpg)
+![installation F-Droid](captures/img5.jpg)
 
-### E — Accès aux données privées
+### Accès aux données privées de l'application
 
 ```bash
 adb shell ls -la /data/data/org.fdroid.fdroid/
 ```
 
-Cet accès est normalement impossible sans root. Il démontre que le sandboxing Android peut être contourné par un attaquant disposant de privilèges élevés.
+Sans root, ce répertoire est totalement inaccessible. Avec root, on peut lire les fichiers internes de n'importe quelle application — ce qui illustre pourquoi le sandboxing d'Android est une protection critique.
 
-![accès /data/data/](captures/img6.jpg)
+![accès données privées](captures/img6.jpg)
 
-### F — Capture des logs système
+### Capture des logs système
 
 ```bash
 adb logcat -d > logcat_root_check.txt
 dir logcat_root_check.txt
 ```
 
-Fichier créé : `logcat_root_check.txt` — 2 325 754 octets.
+Le fichier `logcat_root_check.txt` est créé (2 325 754 octets) — il contient les logs système capturés pendant toute la session.
 
-![logcat](captures/img7.jpg)
+![logcat capturé](captures/img7.jpg)
 
-### G — Remise à zéro
+---
+
+## Partie 4 — Remise à zéro
 
 ```bash
 adb emu avd stop
 ```
 
-Suivi d'un Wipe Data via Android Studio → Device Manager → Wipe Data sur Pixel_5.
+Après l'arrêt de l'AVD, un Wipe Data a été effectué via Android Studio → Device Manager → Wipe Data sur le Pixel_5.
 
-![reset](captures/img8.jpg)
-
----
-
-## 4. Référentiel OWASP MASVS & MASTG
-
-| Référence | Exigence / Test | Application dans ce lab |
-|-----------|-----------------|------------------------|
-| MASVS-STORAGE-1 | Les données sensibles doivent être stockées avec chiffrement | Le root permet d'accéder à `/data/data/` pour vérifier si les tokens sont chiffrés ou en clair |
-| MASVS-NETWORK-1 | Les communications doivent utiliser TLS correctement configuré | Root permet d'installer des CA système pour intercepter le trafic HTTPS |
-| MASTG-TEST-1 | Analyse des SharedPreferences | Inspection de `/data/data/[package]/shared_prefs/` pour détecter des données sensibles en clair |
-| MASTG-TEST-2 | Analyse des fuites via Logcat | `adb logcat` pour détecter des informations sensibles pendant l'exécution |
+![reset AVD](captures/img8.jpg)
 
 ---
 
-## 5. Matrice des Risques & Mesures Défensives
+## Notions théoriques
 
-| Risque | Mesure |
-|--------|--------|
-| Intégrité non garantie → conclusions biaisées | AVD propre dédié aux tests |
-| Surface d'attaque accrue | Réseau totalement isolé |
-| Données sensibles exposées | Données fictives uniquement, aucun compte personnel |
-| Instabilité système | Utilisation de snapshots |
-| Mélange comptes perso/test | Aucun compte Google sur l'AVD |
-| Mauvais nettoyage fin de séance | Wipe Data systématique |
-| Réseau non isolé | Configuration Host-Only |
-| Traçabilité insuffisante | Journalisation logcat + captures horodatées |
+### Sécurité Android — 3 piliers
+
+Android repose sur trois mécanismes de sécurité fondamentaux. Le **sandboxing** isole chaque application dans son propre environnement avec un UID Linux unique. Le **modèle de permissions** oblige les apps à demander explicitement l'accès aux ressources sensibles. L'**intégrité système** est assurée par Verified Boot qui vérifie à chaque démarrage que le système n'a pas été altéré.
+
+### Verified Boot & Chain of Trust
+
+Verified Boot garantit que le système démarré est bien celui prévu par le fabricant. Il repose sur une chaîne de confiance : chaque composant vérifie la signature du suivant avant de lui transmettre l'exécution (ROM → Bootloader → Kernel → System → Android). Si une modification est détectée, l'état passe à `orange` ou `red`.
+
+### AVB — Android Verified Boot 2.0
+
+AVB est la version moderne de Verified Boot. Il ajoute la vérification d'intégrité des partitions (system, vendor, boot) et une protection anti-rollback qui empêche de réinstaller d'anciennes versions du système contenant des failles connues.
 
 ---
+
+## OWASP MASVS & MASTG
+
+| Référence | Contenu | Ce qu'on peut tester avec root |
+|-----------|---------|-------------------------------|
+| MASVS-STORAGE-1 | Les données sensibles doivent être chiffrées | Lire `/data/data/[package]/` pour vérifier si les fichiers sont en clair |
+| MASVS-NETWORK-1 | Les communications doivent utiliser TLS correctement | Installer un CA système pour intercepter le trafic HTTPS |
+| MASTG-TEST-1 | Analyser les SharedPreferences | Inspecter `/data/data/[package]/shared_prefs/` à la recherche de tokens ou mots de passe en clair |
+| MASTG-TEST-2 | Détecter les fuites via les logs | Utiliser `adb logcat` pendant l'exécution de l'app pour identifier des données sensibles |
+
+---
+
+## Risques & Mesures
+
+| Risque | Mesure appliquée |
+|--------|-----------------|
+| Intégrité non garantie → résultats biaisés | AVD propre, aucun résidu d'une session précédente |
+| Surface d'attaque élargie | Réseau isolé, aucune connexion externe |
+| Exposition de données sensibles | Données fictives uniquement |
+| Instabilité de l'émulateur | Snapshot possible avant manipulation |
+| Mélange comptes perso / test | Aucun compte Google sur l'AVD |
+| Traces après la session | Wipe Data systématique |
+| Communications non contrôlées | Mode Host-Only uniquement |
+| Absence de traçabilité | Logs logcat + captures horodatées |
+
+---
+
